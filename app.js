@@ -21,7 +21,8 @@ const defaultState = () => ({
 
 const supabaseClient = window.supabase.createClient(
   window.SERENA_CONFIG?.url || window.SUPABASE_URL,
-  window.SERENA_CONFIG?.publishableKey || window.SUPABASE_PUBLISHABLE_KEY
+  window.SERENA_CONFIG?.publishableKey ||
+    window.SUPABASE_PUBLISHABLE_KEY
 );
 
 let serenaUser = null;
