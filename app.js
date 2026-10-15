@@ -24,26 +24,6 @@ const defaultState = () => ({
 });
 
 let state = defaultState();
-
-/* ===== SERENA: CONEXÃO SUPABASE ===== */
-
-const supabaseClient = window.supabase.createClient(
-  window.SERENA_CONFIG?.url || window.SUPABASE_URL,
-  window.SERENA_CONFIG?.publishableKey ||
-    window.SUPABASE_PUBLISHABLE_KEY
-);
-
-let serenaUser = null;
-let serenaSpaceId = null;
-let serenaChannel = null;
-let serenaSyncing = false;
-let serenaRemoteIds = new Map();
-
-let state = defaultState();
-
-  settings:{}
-});
-let state = defaultState();
 let currentView = 'today';
 let calendarMonth = new Date(new Date().getFullYear(),new Date().getMonth(),1);
 let selectedDate = todayISO();
@@ -70,12 +50,6 @@ async function loadState(){
     if(saved){state={...defaultState(),...saved};return;}
   }
   try{const raw=localStorage.getItem('serena-data');if(raw)state={...defaultState(),...JSON.parse(raw)};}catch(e){console.warn(e);}
-}
-async function saveState(){
-  const db=await dbPromise;
-  if(db){
-    await new Promise(resolve=>{const tx=db.transaction('app','readwrite');tx.objectStore('app').put({id:'main',data:state});tx.oncomplete=resolve;tx.onerror=resolve;});
-  }else{try{localStorage.setItem('serena-data',JSON.stringify(state));}catch(e){showToast('Não foi possível salvar. Exporte um backup.');}}
 }
 function showToast(message){
   const el=$('#toast');el.textContent=message;el.classList.add('show');
@@ -312,10 +286,10 @@ if('serviceWorker' in navigator && location.protocol.startsWith('http'))window.a
 
 /* ===== INICIALIZAÇÃO DA SERENA CONECTADA ===== */
 
-const SERENA_CONFIG = window.SERENA_CONFIG || {};
-const SERENA_URL = SERENA_CONFIG.url || window.SUPABASE_URL;
+const serenaConfig = window.SERENA_CONFIG || {};
+const SERENA_URL = serenaConfig.url || window.SUPABASE_URL;
 const SERENA_KEY =
-  SERENA_CONFIG.publishableKey ||
+  serenaConfig.publishableKey ||
   window.SUPABASE_PUBLISHABLE_KEY;
 
 let serenaClient = null;
@@ -753,7 +727,11 @@ async function serenaSaveLocalOnly() {
       tx.onerror = resolve;
     });
   } else {
-    localStorage.setItem('serena-data', JSON.stringify(state));
+    try {
+      localStorage.setItem('serena-data', JSON.stringify(state));
+    } catch (e) {
+      showToast('Não foi possível salvar. Exporte um backup.');
+    }
   }
 }
 
@@ -889,9 +867,17 @@ async function serenaBoot() {
     return;
   }
 
-  serenaClient = window.supabase.createClient(SERENA_URL, SERENA_KEY);
-
   await loadState();
+
+  // Sem a biblioteca do Supabase (por exemplo, sem internet), o app continua
+  // funcionando só com os dados locais do aparelho.
+  if (!window.supabase) {
+    render();
+    serenaMessage('Sem conexão com o serviço de sincronização. Usando os dados salvos neste aparelho.');
+    return;
+  }
+
+  serenaClient = window.supabase.createClient(SERENA_URL, SERENA_KEY);
 
   const { data } = await serenaClient.auth.getSession();
 
@@ -918,117 +904,3 @@ serenaBoot().catch(error => {
   serenaShowLogin();
   serenaLoginMessage(`Erro ao iniciar: ${error.message}`);
 });
-
-
-function renderSerenaAccess() {
-  let panel = document.getElementById('serena-access');
-
-  if (!panel) {
-    panel = document.createElement('section');
-    panel.id = 'serena-access';
-    panel.className = 'panel';
-    panel.style.maxWidth = '520px';
-    panel.style.margin = '24px auto';
-    document.querySelector('.main-content').prepend(panel);
-  }
-
-  panel.innerHTML = `
-    <div class="panel-head">
-      <div>
-        <span class="eyebrow">SERENA CONECTADA</span>
-        <h2>Seu espaço compartilhado</h2>
-        <p class="panel-subtitle">
-          Entre na sua conta para sincronizar seus dispositivos.
-        </p>
-      </div>
-    </div>
-
-    <form id="serena-auth-form">
-      <label>E-mail
-        <input id="serena-email" type="email" required
-          autocomplete="email" placeholder="voce@exemplo.com">
-      </label>
-
-      <label>Senha
-        <input id="serena-password" type="password" required
-          minlength="6" autocomplete="current-password"
-          placeholder="Mínimo de 6 caracteres">
-      </label>
-
-      <div class="modal-actions">
-        <button class="button button-primary" type="submit"
-          data-auth-mode="login">Entrar</button>
-        <button class="button button-ghost" type="button"
-          id="serena-register">Criar conta</button>
-      </div>
-    </form>
-
-    <div id="serena-space-controls" hidden>
-      <p id="serena-account-info"></p>
-      <button class="button button-primary" id="serena-create-space">
-        Criar espaço e convite
-      </button>
-      <label>Código de convite
-        <input id="serena-invite-code" placeholder="Cole o código recebido">
-      </label>
-      <button class="button button-ghost" id="serena-join-space">
-        Entrar no espaço
-      </button>
-      <button class="text-button" id="serena-logout">Sair da conta</button>
-    </div>
-
-    <p id="serena-access-message" role="status"></p>
-  `;
-
-  const form = document.getElementById('serena-auth-form');
-  const message = document.getElementById('serena-access-message');
-
-  form.addEventListener('submit', async event => {
-    event.preventDefault();
-
-    const email = document.getElementById('serena-email').value.trim();
-    const password = document.getElementById('serena-password').value;
-
-    const { error } = await supabaseClient.auth.signInWithPassword({
-      email,
-      password
-    });
-
-    if (error) {
-      message.textContent = error.message;
-      return;
-    }
-
-    await serenaInitialize();
-  });
-
-  document.getElementById('serena-register').onclick = async () => {
-    const email = document.getElementById('serena-email').value.trim();
-    const password = document.getElementById('serena-password').value;
-
-    if (!email || password.length < 6) {
-      message.textContent = 'Informe um e-mail e uma senha com pelo menos 6 caracteres.';
-      return;
-    }
-
-    const { error } = await supabaseClient.auth.signUp({ email, password });
-
-    message.textContent = error
-      ? error.message
-      : 'Cadastro enviado. Confira seu e-mail se a confirmação estiver ativada.';
-  };
-
-  document.getElementById('serena-create-space').onclick =
-    serenaCreateSpace;
-
-  document.getElementById('serena-join-space').onclick =
-    serenaJoinSpace;
-
-  document.getElementById('serena-logout').onclick =
-    async () => {
-      await supabaseClient.auth.signOut();
-      location.reload();
-    };
-
-  return panel;
-}
