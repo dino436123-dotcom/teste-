@@ -1,0 +1,19 @@
+{
+  "name": "Serena — Agenda & Rotina",
+  "short_name": "Serena",
+  "description": "Agenda pessoal, tarefas, hábitos e metas.",
+  "lang": "pt-BR",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f7f4ee",
+  "theme_color": "#839783",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

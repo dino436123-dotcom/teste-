@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#839783">
+  <meta name="description" content="Serena — sua agenda pessoal, hábitos e metas.">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <title>Serena — Agenda & Rotina</title>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="#" aria-label="Serena início">
+        <span class="brand-mark">s</span>
+        <span><strong>serena</strong><small>agenda & rotina</small></span>
+      </a>
+      <div class="sidebar-date" id="sidebarDate"></div>
+      <nav class="nav" aria-label="Navegação principal">
+        <button class="nav-item active" data-view="today"><span>◷</span> Meu dia</button>
+        <button class="nav-item" data-view="calendar"><span>▦</span> Calendário</button>
+        <button class="nav-item" data-view="tasks"><span>✓</span> Tarefas</button>
+        <button class="nav-item" data-view="habits"><span>✳</span> Hábitos & metas</button>
+        <button class="nav-item" data-view="reports"><span>⌁</span> Relatório semanal</button>
+        <button class="nav-item" data-view="share"><span>♡</span> Compartilhar</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="privacy-note"><span class="privacy-dot"></span><div><strong>Seus dados são seus</strong><small>Salvos neste aparelho</small></div></div>
+        <button class="text-button" id="exportBtn">↓ Exportar backup</button>
+        <label class="text-button import-label">↑ Importar backup<input id="importInput" type="file" accept="application/json"></label>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <div class="mobile-brand"><span class="brand-mark">s</span><strong>serena</strong></div>
+        <div class="topbar-note">um passo de cada vez <span>✿</span></div>
+        <button class="icon-button" id="notificationBtn" title="Ativar notificações" aria-label="Ativar notificações">♧</button>
+      </header>
+      <section id="viewRoot" class="view-root" aria-live="polite"></section>
+      <nav class="mobile-nav" aria-label="Navegação móvel">
+        <button class="active" data-view="today"><span>◷</span><small>Hoje</small></button>
+        <button data-view="calendar"><span>▦</span><small>Agenda</small></button>
+        <button data-view="tasks"><span>✓</span><small>Tarefas</small></button>
+        <button data-view="habits"><span>✳</span><small>Hábitos</small></button>
+        <button data-view="reports"><span>⌁</span><small>Resumo</small></button>
+      </nav>
+    </main>
+  </div>
+
+  <dialog id="eventDialog" class="modal">
+    <form id="eventForm" method="dialog">
+      <div class="modal-head"><div><span class="eyebrow">NA SUA AGENDA</span><h2 id="eventDialogTitle">Novo compromisso</h2></div><button type="button" class="close-button" data-close="eventDialog">×</button></div>
+      <input type="hidden" id="eventId">
+      <label>Título<input id="eventTitle" required maxlength="100" placeholder="Ex.: Aula de pilates"></label>
+      <div class="form-row"><label>Data<input id="eventDate" type="date" required></label><label>Horário<input id="eventTime" type="time"></label></div>
+      <div class="form-row"><label>Categoria<select id="eventCategory"><option>Pessoal</option><option>Trabalho</option><option>Estudos</option><option>Saúde</option><option>Lazer</option><option>Casal</option></select></label><label>Lembrete<select id="eventReminder"><option value="0">Sem lembrete</option><option value="5">5 min antes</option><option value="15">15 min antes</option><option value="30">30 min antes</option><option value="60">1 hora antes</option><option value="1440">1 dia antes</option></select></label></div>
+      <label>Observações<textarea id="eventNotes" rows="3" placeholder="Detalhes opcionais..."></textarea></label>
+      <label class="check-line"><input type="checkbox" id="eventShared"> Quero compartilhar este compromisso</label>
+      <div class="modal-actions"><button type="button" class="button button-ghost" data-close="eventDialog">Cancelar</button><button class="button button-primary" type="submit">Salvar compromisso</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="taskDialog" class="modal">
+    <form id="taskForm" method="dialog">
+      <div class="modal-head"><div><span class="eyebrow">LISTA DE TAREFAS</span><h2>Nova tarefa</h2></div><button type="button" class="close-button" data-close="taskDialog">×</button></div>
+      <input type="hidden" id="taskId">
+      <label>O que precisa ser feito?<input id="taskTitle" required maxlength="120" placeholder="Ex.: Organizar a semana"></label>
+      <div class="form-row"><label>Prazo<input id="taskDate" type="date"></label><label>Prioridade<select id="taskPriority"><option value="low">Tranquila</option><option value="medium" selected>Importante</option><option value="high">Urgente</option></select></label></div>
+      <label>Categoria<select id="taskCategory"><option>Pessoal</option><option>Trabalho</option><option>Estudos</option><option>Saúde</option><option>Casa</option></select></label>
+      <div class="modal-actions"><button type="button" class="button button-ghost" data-close="taskDialog">Cancelar</button><button class="button button-primary" type="submit">Salvar tarefa</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="habitDialog" class="modal">
+    <form id="habitForm" method="dialog">
+      <div class="modal-head"><div><span class="eyebrow">CUIDADO COM VOCÊ</span><h2>Novo hábito</h2></div><button type="button" class="close-button" data-close="habitDialog">×</button></div>
+      <label>Nome do hábito<input id="habitTitle" required maxlength="80" placeholder="Ex.: Ler por 15 minutos"></label>
+      <label>Meta semanal<select id="habitGoal"><option value="1">1 vez por semana</option><option value="3">3 vezes por semana</option><option value="5" selected>5 vezes por semana</option><option value="7">Todos os dias</option></select></label>
+      <div class="modal-actions"><button type="button" class="button button-ghost" data-close="habitDialog">Cancelar</button><button class="button button-primary" type="submit">Criar hábito</button></div>
+    </form>
+  </dialog>
+  <div id="toast" class="toast" role="status"></div>
+  <script src="app.js"></script>
+</body>
+</html>
