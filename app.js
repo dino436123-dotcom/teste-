@@ -11,10 +11,7 @@ const priorityText = {high:'Urgente',medium:'Importante',low:'Tranquila'};
 const weekStart = (date=new Date()) => { const d=new Date(date); d.setHours(12,0,0,0); d.setDate(d.getDate()-((d.getDay()+6)%7)); return d; };
 const addDays = (d,n) => { const x=new Date(d); x.setDate(x.getDate()+n); return x; };
 
-const defaultState = () => ({
-  events: [], tasks: [], habits: [
-    {id:uid(),title:'Beber água',goal:7,checks:{}},
-    
+
 const defaultState = () => ({
   events: [],
   tasks: [],
@@ -25,6 +22,8 @@ const defaultState = () => ({
   ],
   settings: {}
 });
+
+let state = defaultState();
 
 /* ===== SERENA: CONEXÃO SUPABASE ===== */
 
