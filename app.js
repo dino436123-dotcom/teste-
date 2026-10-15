@@ -236,12 +236,38 @@ async function action(el){
   if(a==='select-date'){selectedDate=el.dataset.date;render();return;}
   if(a==='filter-tasks'){taskFilter=el.dataset.filter;render();return;}
   if(a==='edit-event'){const ev=state.events.find(x=>x.id===id);if(ev)openEvent(ev.date,ev);return;}
-  if(a==='delete-event'){if(confirm('Excluir este compromisso?')){state.events=state.events.filter(x=>x.id!==id);await saveState();render();showToast('Compromisso excluído.');}return;}
+  if (a === 'delete-event') {
+  if (confirm('Excluir este compromisso?')) {
+    await serenaDeleteRemote(id);
+    state.events = state.events.filter(x => x.id !== id);
+    await saveState();
+    render();
+    showToast('Compromisso excluído.');
+  }
+  return;
+}
   if(a==='edit-task'){const t=state.tasks.find(x=>x.id===id);if(t)openTask(t);return;}
-  if(a==='delete-task'){if(confirm('Excluir esta tarefa?')){state.tasks=state.tasks.filter(x=>x.id!==id);await saveState();render();showToast('Tarefa excluída.');}return;}
+  if (a === 'delete-task') {
+  if (confirm('Excluir esta tarefa?')) {
+    await serenaDeleteRemote(id);
+    state.tasks = state.tasks.filter(x => x.id !== id);
+    await saveState();
+    render();
+    showToast('Tarefa excluída.');
+  }
+  return;
+}
   if(a==='toggle-task'){const t=state.tasks.find(x=>x.id===id);if(t){t.done=el.checked;t.completedAt=el.checked?new Date().toISOString():null;await saveState();render();}return;}
   if(a==='toggle-habit'||a==='toggle-habit-date'){const h=state.habits.find(x=>x.id===id);if(h){const d=a==='toggle-habit-date'?el.dataset.date:todayISO();h.checks=h.checks||{};if(h.checks[d])delete h.checks[d];else h.checks[d]=true;await saveState();render();}return;}
-  if(a==='delete-habit'){if(confirm('Excluir este hábito e seu histórico?')){state.habits=state.habits.filter(x=>x.id!==id);await saveState();render();}return;}
+  if (a === 'delete-habit') {
+  if (confirm('Excluir este hábito e seu histórico?')) {
+    await serenaDeleteRemote(id);
+    state.habits = state.habits.filter(x => x.id !== id);
+    await saveState();
+    render();
+  }
+  return;
+}
   if(a==='share-event'){const ev=state.events.find(x=>x.id===id);if(ev)shareEvent(ev);return;}
   if(a==='unshare-event'){const ev=state.events.find(x=>x.id===id);if(ev){ev.shared=false;await saveState();render();showToast('Compromisso voltou a ser privado.');}return;}
 }
@@ -271,7 +297,617 @@ $('#notificationBtn').addEventListener('click',requestNotifications);
 $('#exportBtn').addEventListener('click',exportBackup);
 $('#importInput').addEventListener('change',e=>{const f=e.target.files?.[0];if(f)importBackup(f);e.target.value='';});
 if('serviceWorker' in navigator && location.protocol.startsWith('http'))window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));
-(async()=>{await loadState();render();eventReminderSchedule();})();
+
+/* ===== INICIALIZAÇÃO DA SERENA CONECTADA ===== */
+
+const SERENA_CONFIG = window.SERENA_CONFIG || {};
+const SERENA_URL = SERENA_CONFIG.url || window.SUPABASE_URL;
+const SERENA_KEY =
+  SERENA_CONFIG.publishableKey ||
+  window.SUPABASE_PUBLISHABLE_KEY;
+
+let serenaClient = null;
+let serenaCurrentUser = null;
+let serenaCurrentSpace = null;
+let serenaRealtimeChannel = null;
+let serenaRemoteIdByLocalId = new Map();
+let serenaApplyingRemote = false;
+let serenaReady = false;
+
+function serenaMessage(text) {
+  let el = document.getElementById('serena-status');
+
+  if (!el) {
+    el = document.createElement('p');
+    el.id = 'serena-status';
+    el.setAttribute('role', 'status');
+    el.style.cssText = 'padding:12px;line-height:1.5';
+    document.body.appendChild(el);
+  }
+
+  el.textContent = text;
+}
+
+function serenaShowLogin() {
+  let el = document.getElementById('serena-login');
+
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'serena-login';
+    el.style.cssText = [
+      'position:fixed',
+      'inset:0',
+      'z-index:99999',
+      'background:#f7f4ed',
+      'display:grid',
+      'place-items:center',
+      'padding:20px',
+      'overflow:auto'
+    ].join(';');
+
+    el.innerHTML = `
+      <section style="width:min(100%,440px);background:white;
+        padding:28px;border-radius:20px;color:#263b30;
+        box-shadow:0 12px 40px #0001">
+        <p style="letter-spacing:3px;font-size:12px">SERENA</p>
+        <h1 style="font-size:30px">Nosso espaço</h1>
+        <p>Entre na sua conta ou crie uma conta individual.</p>
+
+        <form id="serena-login-form">
+          <label for="serena-email">E-mail</label>
+          <input id="serena-email" type="email" required
+            autocomplete="email"
+            style="display:block;width:100%;padding:12px;
+            margin:8px 0 16px;box-sizing:border-box">
+
+          <label for="serena-password">Senha</label>
+          <input id="serena-password" type="password" required
+            minlength="6" autocomplete="current-password"
+            style="display:block;width:100%;padding:12px;
+            margin:8px 0 16px;box-sizing:border-box">
+
+          <button type="submit" style="width:100%;padding:13px">
+            Entrar
+          </button>
+          <button type="button" id="serena-signup"
+            style="width:100%;padding:13px;margin-top:8px">
+            Criar conta
+          </button>
+        </form>
+
+        <hr style="margin:22px 0">
+
+        <div id="serena-space-area" hidden>
+          <p id="serena-user-label"></p>
+          <button id="serena-create-space" style="width:100%;padding:12px">
+            Criar espaço compartilhado
+          </button>
+
+          <label for="serena-invite" style="display:block;margin-top:16px">
+            Código de convite
+          </label>
+          <input id="serena-invite" autocomplete="off"
+            style="width:100%;padding:12px;box-sizing:border-box;
+            margin:8px 0">
+
+          <button id="serena-join-space" style="width:100%;padding:12px">
+            Entrar com convite
+          </button>
+          <button id="serena-logout" style="margin-top:14px">
+            Sair da conta
+          </button>
+        </div>
+
+        <p id="serena-login-status" role="status"
+          style="overflow-wrap:anywhere"></p>
+      </section>
+    `;
+
+    document.body.appendChild(el);
+
+    document.getElementById('serena-login-form').onsubmit =
+      async event => {
+        event.preventDefault();
+
+        const email = document.getElementById('serena-email').value.trim();
+        const password =
+          document.getElementById('serena-password').value;
+
+        const { error } = await serenaClient.auth.signInWithPassword({
+          email,
+          password
+        });
+
+        if (error) {
+          serenaLoginMessage(error.message);
+          return;
+        }
+
+        await serenaRefreshSession();
+      };
+
+    document.getElementById('serena-signup').onclick = async () => {
+      const email = document.getElementById('serena-email').value.trim();
+      const password =
+        document.getElementById('serena-password').value;
+
+      if (!email || password.length < 6) {
+        serenaLoginMessage(
+          'Informe um e-mail e uma senha com pelo menos 6 caracteres.'
+        );
+        return;
+      }
+
+      const { data, error } = await serenaClient.auth.signUp({
+        email,
+        password
+      });
+
+      if (error) {
+        serenaLoginMessage(error.message);
+        return;
+      }
+
+      if (!data.session) {
+        serenaLoginMessage(
+          'Cadastro criado. Confirme seu e-mail e depois entre na conta.'
+        );
+        return;
+      }
+
+      await serenaRefreshSession();
+    };
+
+    document.getElementById('serena-create-space').onclick =
+      serenaCreateSpace;
+
+    document.getElementById('serena-join-space').onclick =
+      serenaJoinSpace;
+
+    document.getElementById('serena-logout').onclick = async () => {
+      await serenaClient.auth.signOut();
+      location.reload();
+    };
+  }
+
+  el.style.display = 'grid';
+}
+
+function serenaLoginMessage(message) {
+  const el = document.getElementById('serena-login-status');
+  if (el) el.textContent = message;
+}
+
+function serenaHideLogin() {
+  const el = document.getElementById('serena-login');
+  if (el) el.style.display = 'none';
+}
+
+async function serenaRefreshSession() {
+  const { data, error } = await serenaClient.auth.getUser();
+
+  if (error || !data.user) {
+    serenaLoginMessage(error?.message || 'Entre na sua conta.');
+    serenaShowLogin();
+    return;
+  }
+
+  serenaCurrentUser = data.user;
+
+  const area = document.getElementById('serena-space-area');
+  if (area) area.hidden = false;
+
+  const label = document.getElementById('serena-user-label');
+  if (label) label.textContent = `Conta: ${serenaCurrentUser.email}`;
+
+  await serenaFindMembership();
+}
+
+async function serenaFindMembership() {
+  const { data, error } = await serenaClient
+    .from('serena_member')
+    .select('space_id, role')
+    .eq('user_id', serenaCurrentUser.id)
+    .limit(1);
+
+  if (error) {
+    serenaLoginMessage(
+      'Não foi possível consultar o espaço. Confira as políticas RLS.'
+    );
+    return;
+  }
+
+  if (!data?.length) {
+    serenaLoginMessage(
+      'Crie um espaço ou entre usando o código de convite da outra pessoa.'
+    );
+    return;
+  }
+
+  await serenaActivateSpace(data[0].space_id);
+}
+
+async function serenaCreateSpace() {
+  serenaLoginMessage('Criando espaço…');
+
+  const { data, error } = await serenaClient.rpc('serena_create_space');
+
+  if (error) {
+    serenaLoginMessage(`Erro ao criar espaço: ${error.message}`);
+    return;
+  }
+
+  const spaceId = data;
+
+  const { data: space, error: readError } = await serenaClient
+    .from('serena_spaces')
+    .select('id, invite_code')
+    .eq('id', spaceId)
+    .single();
+
+  if (readError || !space) {
+    serenaLoginMessage(
+      'Espaço criado, mas não foi possível ler o convite. Confira a política de leitura de serena_spaces.'
+    );
+    return;
+  }
+
+  await serenaActivateSpace(space.id);
+
+  serenaLoginMessage(
+    `Espaço criado! Código de convite: ${space.invite_code}. ` +
+    'Envie esse código para a outra pessoa.'
+  );
+
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(space.invite_code).catch(() => {});
+  }
+}
+
+async function serenaJoinSpace() {
+  const code = document.getElementById('serena-invite').value.trim();
+
+  if (!code) {
+    serenaLoginMessage('Digite o código de convite.');
+    return;
+  }
+
+  const { data, error } = await serenaClient.rpc('serena_join_space', {
+    invite_code_input: code
+  });
+
+  if (error) {
+    serenaLoginMessage(`Não foi possível entrar: ${error.message}`);
+    return;
+  }
+
+  await serenaActivateSpace(data);
+}
+
+async function serenaActivateSpace(spaceId) {
+  serenaCurrentSpace = spaceId;
+  serenaLoginMessage('Carregando agenda compartilhada…');
+
+  try {
+    await serenaLoadCloudItems();
+    await serenaSetupRealtime();
+
+    serenaReady = true;
+    serenaHideLogin();
+    render();
+    eventReminderSchedule();
+
+    serenaMessage('Serena sincronizada com o espaço compartilhado.');
+  } catch (error) {
+    serenaLoginMessage(`Falha ao carregar a agenda: ${error.message}`);
+  }
+}
+
+function serenaToRow(item, type) {
+  const localId = String(item.id);
+  const remoteId = serenaRemoteIdByLocalId.get(localId);
+
+  let title = item.title || 'Sem título';
+  let target = null;
+  let current = 0;
+  let unit = null;
+  let itemDate = null;
+  let priority = 'normal';
+  let completed = false;
+
+  if (type === 'task') {
+    priority = item.priority === 'high' ? 'high'
+      : item.priority === 'low' ? 'low' : 'normal';
+    itemDate = item.date || null;
+    completed = !!item.done;
+  } else if (type === 'event') {
+    itemDate = item.date || null;
+  } else if (type === 'habit') {
+    target = Number(item.goal || 1);
+    unit = 'vezes/semana';
+    current = Object.values(item.checks || {}).filter(Boolean).length;
+  }
+
+  return {
+    ...(remoteId ? { id: remoteId } : {}),
+    owner_id: serenaCurrentUser.id,
+    space_id: serenaCurrentSpace,
+    title,
+    item_type: type,
+    target,
+    current,
+    unit,
+    item_date: itemDate,
+    priority,
+    completed,
+    history: {
+      serena_local_id: localId,
+      payload: item
+    },
+    updated_at: new Date().toISOString()
+  };
+}
+
+function serenaFromRow(row) {
+  const payload = row.history?.payload;
+
+  if (payload && typeof payload === 'object') {
+    serenaRemoteIdByLocalId.set(
+      String(row.history.serena_local_id || payload.id),
+      row.id
+    );
+    return { type: row.item_type, item: payload };
+  }
+
+  const item = {
+    id: row.id,
+    title: row.title
+  };
+
+  if (row.item_type === 'task') {
+    item.date = row.item_date;
+    item.priority = row.priority === 'normal' ? 'medium' : row.priority;
+    item.done = row.completed;
+    item.completedAt = null;
+    item.category = 'Pessoal';
+  }
+
+  if (row.item_type === 'event') {
+    item.date = row.item_date;
+    item.time = '';
+    item.category = 'Pessoal';
+    item.reminder = 0;
+    item.notes = '';
+    item.shared = true;
+  }
+
+  if (row.item_type === 'habit') {
+    item.goal = Number(row.target || 1);
+    item.checks = {};
+  }
+
+  serenaRemoteIdByLocalId.set(String(item.id), row.id);
+  return { type: row.item_type, item };
+}
+
+async function serenaLoadCloudItems() {
+  const { data, error } = await serenaClient
+    .from('serena_items')
+    .select('*')
+    .eq('space_id', serenaCurrentSpace);
+
+  if (error) throw error;
+
+  const cloud = { events: [], tasks: [], habits: [] };
+
+  for (const row of data || []) {
+    const result = serenaFromRow(row);
+
+    if (result.type === 'event') cloud.events.push(result.item);
+    if (result.type === 'task') cloud.tasks.push(result.item);
+    if (result.type === 'habit') cloud.habits.push(result.item);
+  }
+
+  /*
+   * Se o espaço estiver vazio, não apague dados locais existentes:
+   * mantenha-os para a primeira sincronização.
+   * Se já houver registros na nuvem, a nuvem passa a ser a fonte inicial.
+   */
+  if (data?.length) {
+    state = {
+      ...state,
+      events: cloud.events,
+      tasks: cloud.tasks,
+      habits: cloud.habits
+    };
+  }
+
+  await serenaSaveLocalOnly();
+  render();
+
+  if (!data?.length) {
+    await serenaPushAllLocalItems();
+  }
+}
+
+async function serenaSaveLocalOnly() {
+  const db = await dbPromise;
+
+  if (db) {
+    await new Promise(resolve => {
+      const tx = db.transaction('app', 'readwrite');
+      tx.objectStore('app').put({ id: 'main', data: state });
+      tx.oncomplete = resolve;
+      tx.onerror = resolve;
+    });
+  } else {
+    localStorage.setItem('serena-data', JSON.stringify(state));
+  }
+}
+
+async function serenaPushAllLocalItems() {
+  for (const item of state.events) {
+    await serenaUpsertItem(item, 'event');
+  }
+
+  for (const item of state.tasks) {
+    await serenaUpsertItem(item, 'task');
+  }
+
+  for (const item of state.habits) {
+    await serenaUpsertItem(item, 'habit');
+  }
+}
+
+async function serenaUpsertItem(item, type) {
+  if (!serenaCurrentUser || !serenaCurrentSpace) return;
+
+  const row = serenaToRow(item, type);
+  const { data, error } = await serenaClient
+    .from('serena_items')
+    .upsert(row, { onConflict: 'id' })
+    .select('id, history')
+    .single();
+
+  if (error) {
+    console.error('Falha ao sincronizar item:', error);
+    showToast(`Erro de sincronização: ${error.message}`);
+    return;
+  }
+
+  serenaRemoteIdByLocalId.set(String(item.id), data.id);
+}
+
+async function serenaSetupRealtime() {
+  if (serenaRealtimeChannel) {
+    await serenaClient.removeChannel(serenaRealtimeChannel);
+  }
+
+  serenaRealtimeChannel = serenaClient
+    .channel(`serena-space-${serenaCurrentSpace}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'serena_items',
+        filter: `space_id=eq.${serenaCurrentSpace}`
+      },
+      async () => {
+        if (serenaApplyingRemote) return;
+
+        serenaApplyingRemote = true;
+        try {
+          await serenaReloadCloudItems();
+        } catch (error) {
+          console.error('Erro ao receber atualização:', error);
+        } finally {
+          serenaApplyingRemote = false;
+        }
+      }
+    )
+    .subscribe(status => {
+      if (status === 'SUBSCRIBED') {
+        serenaMessage('Conectada: sincronização em tempo real ativa.');
+      }
+    });
+}
+
+async function serenaReloadCloudItems() {
+  const { data, error } = await serenaClient
+    .from('serena_items')
+    .select('*')
+    .eq('space_id', serenaCurrentSpace);
+
+  if (error) throw error;
+
+  const cloud = { events: [], tasks: [], habits: [] };
+
+  for (const row of data || []) {
+    const result = serenaFromRow(row);
+
+    if (result.type === 'event') cloud.events.push(result.item);
+    if (result.type === 'task') cloud.tasks.push(result.item);
+    if (result.type === 'habit') cloud.habits.push(result.item);
+  }
+
+  state = { ...state, ...cloud };
+  await serenaSaveLocalOnly();
+  render();
+}
+
+/*
+ * Sobrescreve saveState para continuar salvando localmente e enviar
+ * as alterações para a nuvem. A exclusão remota é tratada separadamente.
+ */
+async function saveState() {
+  await serenaSaveLocalOnly();
+
+  if (!serenaReady || serenaApplyingRemote) return;
+
+  await serenaPushAllLocalItems();
+}
+
+/* Exclusão remota segura de um item específico. */
+async function serenaDeleteRemote(localId) {
+  const remoteId = serenaRemoteIdByLocalId.get(String(localId));
+  if (!remoteId || !serenaReady) return;
+
+  const { error } = await serenaClient
+    .from('serena_items')
+    .delete()
+    .eq('id', remoteId)
+    .eq('space_id', serenaCurrentSpace);
+
+  if (error) {
+    showToast(`Erro ao excluir na nuvem: ${error.message}`);
+    return;
+  }
+
+  serenaRemoteIdByLocalId.delete(String(localId));
+}
+
+/* Inicialização da aplicação conectada. */
+async function serenaBoot() {
+  if (!SERENA_URL || !SERENA_KEY) {
+    serenaShowLogin();
+    serenaLoginMessage(
+      'Configuração ausente: confira SERENA_CONFIG.url e SERENA_CONFIG.publishableKey em config.js.'
+    );
+    return;
+  }
+
+  serenaClient = window.supabase.createClient(SERENA_URL, SERENA_KEY);
+
+  await loadState();
+
+  const { data } = await serenaClient.auth.getSession();
+
+  if (data.session?.user) {
+    await serenaRefreshSession();
+  } else {
+    serenaShowLogin();
+  }
+
+  serenaClient.auth.onAuthStateChange((event, session) => {
+    if (event === 'SIGNED_OUT') {
+      serenaReady = false;
+      serenaCurrentUser = null;
+      serenaCurrentSpace = null;
+      serenaShowLogin();
+    }
+  });
+
+  render();
+}
+
+serenaBoot().catch(error => {
+  console.error(error);
+  serenaShowLogin();
+  serenaLoginMessage(`Erro ao iniciar: ${error.message}`);
+});
+
+
 function renderSerenaAccess() {
   let panel = document.getElementById('serena-access');
 
