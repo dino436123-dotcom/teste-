@@ -14,10 +14,19 @@ const addDays = (d,n) => { const x=new Date(d); x.setDate(x.getDate()+n); return
 const defaultState = () => ({
   events: [], tasks: [], habits: [
     {id:uid(),title:'Beber água',goal:7,checks:{}},
+    
+const defaultState = () => ({
+  events: [],
+  tasks: [],
+  habits: [
+    {id:uid(),title:'Beber água',goal:7,checks:{}},
     {id:uid(),title:'Ler um pouco',goal:5,checks:{}},
     {id:uid(),title:'Movimentar o corpo',goal:3,checks:{}}
   ],
-  /* ===== SERENA: CONEXÃO SUPABASE ===== */
+  settings: {}
+});
+
+/* ===== SERENA: CONEXÃO SUPABASE ===== */
 
 const supabaseClient = window.supabase.createClient(
   window.SERENA_CONFIG?.url || window.SUPABASE_URL,
@@ -30,6 +39,9 @@ let serenaSpaceId = null;
 let serenaChannel = null;
 let serenaSyncing = false;
 let serenaRemoteIds = new Map();
+
+let state = defaultState();
+
   settings:{}
 });
 let state = defaultState();
